@@ -12,3 +12,6 @@ Setup and tests for Markov Chain Monte Carlo param.
 
 ## MC
 Setup and tests for Monte Carlo param.
+
+## Incubation 
+Model code for sim. of aneorobic incubations
