@@ -364,7 +364,7 @@ params$fPHYS_MULT = 1
 
 ```{r}
 # Set MCMC Configuration
-num_iter <- 10000
+num_iter <- 5000
 log_likelihood_prior_current <- -10000000000
 accept <- 0
 
