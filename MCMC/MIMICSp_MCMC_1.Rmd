@@ -285,8 +285,8 @@ RXEQ <- function(t, y, pars) {
     SOMmin[2] = MIC_2 * VMAX[6] * SOM_3 / (KM[6] + MIC_2)   #decomp of SOMa by MIC_2
     
     # Flows to and from MICa
-    #LITmin[5] = MIC_A * VMAX[7] * LIT_1 / (KM[7] + MIC_A)   #decomp of MET litter
-    #LITmin[6] = MIC_A * VMAX[7] * LIT_2 / (KM[7] + MIC_A)   #decomp of SRUCTURAL litter   
+    LITmin[5] = MIC_A * VMAX[7] * LIT_1 / (KM[7] + MIC_A)   #decomp of MET litter
+    LITmin[6] = MIC_A * VMAX[7] * LIT_2 / (KM[7] + MIC_A)   #decomp of SRUCTURAL litter   
     MICtrn[7] = MIC_A * tau[3] * fPHYS[3]                   #MIC_A turnover to PHYSCIAL SOM
     MICtrn[8] = MIC_A * tau[3] * fCHEM[3]                   #MIC_A turnober to CHEMICAL SOM
     MICtrn[9] = MIC_A * tau[3] * fAVAI[3]                   #MIC_A turnover to AVAILABLE SOM
@@ -294,10 +294,10 @@ RXEQ <- function(t, y, pars) {
     
     
     # Protected C pool losses
-    DEsorb    = SOM_1 * desorb  #* (MIC_1 + MIC_2)  	#desorbtion of PHYS to AVAIL (function of fCLAY)
+    DEsorb    = SOM_1 * desorb  #  	#desorbtion of PHYS to AVAIL (function of fCLAY)
     OXIDAT    = ((MIC_1 * VMAX[2] * SOM_2 / (KO[1]*KM[2] + MIC_1)) +
-                   (MIC_2 * VMAX[5] * SOM_2 / (KO[2]*KM[5] + MIC_2))) # +
-                   # (MIC_A * VMAX[7] * SOM_2 / (KO[3]*KM[7] + MIC_A)))  #oxidation of C to A
+                   (MIC_2 * VMAX[5] * SOM_2 / (KO[2]*KM[5] + MIC_2)) + 
+                    (MIC_A * VMAX[7] * SOM_2 / (KO[3]*KM[7] + MIC_A)))  #oxidation of C to A
     
     # ODE System 
     dLIT_1 = I[1]*(1-FI[1]) - LITmin[1] - LITmin[3] 
@@ -307,7 +307,7 @@ RXEQ <- function(t, y, pars) {
     dMIC_2 = CUE[3]*(LITmin[3]+ SOMmin[2]) + CUE[4]*(LITmin[4]) - (MICtrn[[4]] + MICtrn[[5]] + MICtrn[[6]])
     dSOM_2 = I[2]*FI[2] + MICtrn[2] + MICtrn[5] + MICtrn[8] - OXIDAT
     dSOM_3 = MICtrn[3] + MICtrn[6] + DEsorb + OXIDAT - SOMmin[1] - SOMmin[2] - SOMmin[3] + MICtrn[9]
-    dMIC_A = (CUE[5] * SOMmin[3]) - (MICtrn[[7]]) 
+    dMIC_A = (CUE[5] * (SOMmin[3] + LITmin[4] + LITmin[5])) - (MICtrn[[7]]) 
     
     # Return Function 
     list(c(dLIT_1, dLIT_2, dMIC_1, dMIC_2, dMIC_A, dSOM_1, dSOM_2, dSOM_3))
@@ -360,6 +360,22 @@ params$desorb_MULT = 1
 params$fPHYS_MULT = 1
 ```
 
+# Run model for test
+
+```{r}
+data <- data <- read.csv("TESTOBS.csv", as.is=T)
+
+MIMtest <- data %>% split(1:nrow(data)) %>% map(~ MIMICS1(df=.)) %>% bind_rows()
+MIMtest <- MIMtest |>
+  select('Site', 'MIMSOC', 'MIMLIT', 'MIMMIC',
+         'LITm', 'LITs',
+         'MICr', 'MICK', 'MICa',
+         'SOMp', 'SOMc', 'SOMa')
+
+MIMtest
+```
+
+
 # MCMC configuration and proposed parameter objects
 
 ```{r}
@@ -370,32 +386,24 @@ accept <- 0
 
 
 # Initialize chain
-num_pars <- 6
-jump_params <- c(0.01, 0.01, .005, 0.3, 0.3, 0.00005)
+num_pars <- 3
+jump_params <- c(0.01, 0.01, .01)
 
 # Select parameters for fit
 fit_params <- array(NA, dim = c(num_pars, num_iter))
 fit_params[1, 1] <- params$Vslope[7]
-fit_params[2, 1] <- params$Kslope[7]
-fit_params[3, 1] <- params$tau_a[2]
-fit_params[4, 1] <- params$Vint[7]
-fit_params[5, 1] <- params$Kint[7]
-fit_params[6, 1] <- params$tau_a[1]
+fit_params[2, 1] <- params$Kslope[6]
+fit_params[3, 1] <- params$Kslope[3]
+
 
 # Distribution of priors
-prior_mean <- c(params$Vslope[7] * 2, 
-                params$Kslope[7] * 2,
-                params$tau_a[2] / 2,
-                params$Vint[7],
-                params$Kint[7],
-                params$tau_a[1])
+prior_mean <- c(params$Vslope[7] / 2, 
+                params$Vslope[6],
+                params$Vslope[3])
 
-prior_sd <- c(0.003, 
-              0.001, 
-              0.02, 
-              2, 
-              2, 
-              0.0001)
+prior_sd <- c(0.025, 
+              0.025, 
+              0.025)
 ```
 
 # Observations
@@ -414,7 +422,7 @@ obs_long <- pivot_longer(obs,
   values_to = 'observed')
 
 obs_long <- obs_long |>
-  mutate(sds = case_when(variable == 'MICa' ~ 0.1,
+  mutate(sds = case_when(variable == 'MICa' ~ sds,
                          variable == 'SOC' ~ 1))
 ```
 
@@ -431,17 +439,12 @@ for(iter in 2:num_iter){
     
     log_prior <- dnorm(proposed_pars[1], mean = prior_mean[1], sd = prior_sd[1], log = TRUE) +
       dnorm(proposed_pars[2], mean = prior_mean[2], sd = prior_sd[2], log = TRUE) +
-      dnorm(proposed_pars[3], mean = prior_mean[3], sd = prior_sd[3], log = TRUE) +
-      dnorm(proposed_pars[4], mean = prior_mean[4], sd = prior_sd[4], log = TRUE) + 
-      dnorm(proposed_pars[5], mean = prior_mean[5], sd = prior_sd[5], log = TRUE) + 
-      dnorm(proposed_pars[6], mean = prior_mean[6], sd = prior_sd[6], log = TRUE)
+      dnorm(proposed_pars[3], mean = prior_mean[3], sd = prior_sd[3], log = TRUE) 
+
     
     params$Vslope[7]  <- proposed_pars[1]
     params$Kslope[7]  <- proposed_pars[2]
     params$tau_a[2] <- proposed_pars[3]
-    params$Vint[7]  <- proposed_pars[4]
-    params$Kint[7]  <- proposed_pars[5]
-    params$tau_a[1] <- proposed_pars[6]
     
     # Run Model w/in MCMC
     data <- data <- read.csv("testData.csv", as.is=T)
@@ -486,20 +489,41 @@ for(iter in 2:num_iter){
     
 ```
 
+# Check model output
+```{r}
+print('Last Output from MCMC run')
+combined_output_obs
+```
+
 # Analyze MCMC results 
 ```{r}
 accept / (num_iter * num_pars)
 ```
 
 ```{r}
-nburn <- 500
+nburn <- 1
 parameter_MCMC <- tibble(iter = nburn:num_iter,
-            Vslope_MCMC = fit_params[1, nburn:num_iter],
-            Kslope_MCMC = fit_params[2, nburn:num_iter],
-            tauA2_MCMC = fit_params[3, nburn:num_iter],
-            Vint_MCMC = fit_params[4, nburn:num_iter],
-            Kint_MCMC = fit_params[5, nburn:num_iter],
-            tauA1_MCMC = fit_params[6, nburn:num_iter])%>%
+            Vslope_a = fit_params[1, nburn:num_iter],
+            Vslope_r = fit_params[2, nburn:num_iter],
+            Vslope_k = fit_params[3, nburn:num_iter])%>%
+  pivot_longer(-iter, values_to = "value", names_to = "parameter")
+```
+
+```{r}
+p1 <- ggplot(parameter_MCMC, aes(x = iter, y = value)) +
+  geom_line() +
+  facet_wrap(~parameter, scales = "free") +
+  theme_bw()
+
+p1
+```
+
+```{r}
+nburn <- 50
+parameter_MCMC <- tibble(iter = nburn:num_iter,
+            Vslope_a = fit_params[1, nburn:num_iter],
+            Vslope_r = fit_params[2, nburn:num_iter],
+            Vslope_k = fit_params[3, nburn:num_iter])%>%
   pivot_longer(-iter, values_to = "value", names_to = "parameter")
 ```
 
@@ -519,6 +543,20 @@ p2 <- ggplot(parameter_MCMC, aes(x = value)) +
   theme_bw()
 
 p2
+
+mean_tab <- parameter_MCMC |>
+  group_by(parameter) |>
+  summarise(parm_mean = mean(value)) |>
+  as.data.frame()
+
+mean_tab
+
+sd_tab <- parameter_MCMC |>
+  group_by(parameter) |>
+  summarise(parm_sd = sd(value)) |>
+  as.data.frame()
+
+sd_tab
 ```
 
 
